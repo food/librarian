@@ -1,0 +1,18 @@
+services:
+  librarian:
+    build:
+      context: .
+      # To pull through a local PyPI cache, add build args:
+      #   PIP_INDEX_URL: http://<cache-host>:9191/index/
+      #   PIP_TRUSTED_HOST: <cache-host>
+    container_name: librarian
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    env_file: .env
+    environment:
+      TZ: Europe/Berlin
+    volumes:
+      - ./memory-bundle:/bundle   # the library (its own git repo!)
+      - ./data:/data              # librarian.db (FTS/hot cache/traces) -- reconstructible
+      - ./docs-mirror:/docs:ro    # reference shelf: docs mirror, READ-ONLY

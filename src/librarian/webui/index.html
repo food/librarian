@@ -1,0 +1,1442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Librarian - Memory Graph</title>
+<style>
+  :root {
+    --bg: #10131a; --panel: #181c26; --border: #2a3040; --fg: #d8dee9;
+    --dim: #8892a6; --accent: #6ea8fe; --danger: #e46a6a;
+    --overlay: rgba(24,28,38,.92);
+    --c-people: #e8a838; --c-projects: #6ea8fe; --c-infrastructure: #54c6a9;
+    --c-knowledge: #b58cf5; --c-preferences: #f07ab8; --c-events: #8ad06a;
+    --c-inbox: #97a1b5;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--fg);
+         font: 14px/1.5 system-ui, "Segoe UI", sans-serif; height: 100vh;
+         display: flex; flex-direction: column; overflow: hidden; }
+  header { display: flex; gap: 12px; align-items: center; padding: 8px 14px;
+           background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 15px; font-weight: 600; margin-right: 6px; }
+  header h1 span { color: var(--accent); }
+  .tabs button { background: none; border: none; color: var(--dim); padding: 6px 10px;
+                 cursor: pointer; font: inherit; border-radius: 6px; }
+  .tabs button.active { color: var(--fg); background: #232939; }
+  #key { margin-left: auto; background: #0d1017; color: var(--fg);
+         border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; width: 210px; }
+  #status { color: var(--dim); font-size: 12px; min-width: 130px; text-align: right; }
+  #lang { background: none; border: 1px solid var(--border); color: var(--dim);
+          border-radius: 6px; padding: 3px 8px; cursor: pointer; font: inherit;
+          font-size: 12px; }
+  #lang:hover { color: var(--fg); }
+  main { flex: 1; position: relative; overflow: hidden; }
+  .view { position: absolute; inset: 0; display: none; }
+  .view.active { display: block; }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  #graphmode { position: absolute; left: 12px; top: 12px; display: flex; gap: 6px; }
+  #graphmode button { background: var(--overlay); border: 1px solid var(--border);
+                      color: var(--dim); border-radius: 8px; padding: 5px 12px;
+                      cursor: pointer; font: inherit; font-size: 13px; }
+  #graphmode button:hover { color: var(--fg); border-color: var(--dim); }
+  #graphmode button.active { color: var(--fg); border-color: var(--accent); }
+  #legend { position: absolute; left: 12px; bottom: 12px; background: var(--overlay);
+            border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+            font-size: 12px; color: var(--dim); }
+  #legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+              margin-right: 6px; }
+  #legend div { margin: 2px 0; }
+  #legend div[data-sec] { cursor: pointer; user-select: none; }
+  #legend .off { opacity: .45; text-decoration: line-through; }
+  #graphmode input { background: var(--overlay); border: 1px solid var(--border);
+                     color: var(--fg); border-radius: 8px; padding: 5px 10px;
+                     font: inherit; font-size: 13px; width: 190px; }
+  #graphmode input::placeholder { color: var(--dim); }
+  #panel { position: absolute; top: 0; right: 0; bottom: 0; width: 380px; max-width: 90vw;
+           background: var(--panel); border-left: 1px solid var(--border); padding: 16px;
+           overflow-y: auto; transform: translateX(100%); transition: transform .15s; }
+  #panel.open { transform: none; }
+  #panel .close { float: right; background: none; border: none; color: var(--dim);
+                  font-size: 18px; cursor: pointer; }
+  #panel h2 { font-size: 16px; margin-bottom: 2px; }
+  #panel .meta { color: var(--dim); font-size: 12px; margin-bottom: 12px; }
+  #panel a { color: var(--accent); text-decoration: none; cursor: pointer; }
+  #panel ul { padding-left: 18px; margin: 6px 0; }
+  #panel li { margin: 3px 0; }
+  #panel .body h1, #panel .body h2, #panel .body h3 { font-size: 14px; margin: 12px 0 4px; }
+  #panel .body ul { padding-left: 18px; margin: 6px 0; }
+  #panel .body p { margin: 6px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border);
+           vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; position: sticky; top: 0; background: var(--bg); }
+  .scroll { position: absolute; inset: 0; overflow: auto; padding: 14px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px;
+          background: #232939; color: var(--dim); }
+  .empty { color: var(--dim); padding: 40px; text-align: center; }
+  .rv button { margin-right: 6px; background: #232939; color: var(--fg);
+               border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px;
+               cursor: pointer; }
+  /* ---------- Docs tab: docs-site look ---------- */
+  .docs-layout { position: absolute; inset: 0; display: flex; }
+  #doclist { width: 280px; flex-shrink: 0; overflow-y: auto; padding: 16px 8px 24px 14px;
+             border-right: 1px solid var(--border); background: var(--panel); }
+  #doclist .docgrp { margin-top: 14px; }
+  #doclist .docgrp:first-child { margin-top: 2px; }
+  #doclist .grp { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+                  color: var(--dim); margin: 0 0 6px 0; padding: 3px 8px;
+                  display: flex; align-items: center; gap: 6px; cursor: pointer;
+                  user-select: none; border-radius: 6px; }
+  #doclist .grp:hover { color: var(--fg); background: #232939; }
+  #doclist .grp-caret { display: inline-block; transition: transform .12s;
+                        font-size: 9px; color: var(--dim); }
+  #doclist .docgrp:not(.collapsed) .grp-caret { transform: rotate(90deg); }
+  #doclist .grp-count { margin-left: auto; font-size: 10px; letter-spacing: 0;
+                        color: var(--dim); background: #232939; border-radius: 9px;
+                        padding: 0 7px; }
+  #doclist .docgrp.collapsed .docgrp-items { display: none; }
+  #doclist a { display: block; padding: 5px 10px; border-radius: 6px; color: var(--fg);
+               text-decoration: none; cursor: pointer; font-size: 13px;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #doclist a:hover { background: #232939; }
+  #doclist a.active { background: #223050; color: var(--accent); font-weight: 600; }
+  .docview { flex: 1; overflow-y: auto; padding: 28px 40px 80px;
+             font-size: 14.5px; line-height: 1.65; }
+  .docview > * { max-width: 860px; }
+  .docview h1 { font-size: 26px; margin: 4px 0 14px; padding-bottom: 10px;
+                border-bottom: 1px solid var(--border); }
+  .docview h2 { font-size: 19px; margin: 28px 0 10px; padding-bottom: 6px;
+                border-bottom: 1px solid var(--border); }
+  .docview h3 { font-size: 16px; margin: 22px 0 8px; }
+  .docview p { margin: 8px 0; }
+  .docview ul, .docview ol { padding-left: 24px; margin: 8px 0; }
+  .docview li { margin: 3px 0; }
+  .docview a { color: var(--accent); text-decoration: none; }
+  .docview a:hover { text-decoration: underline; }
+  .docview code { background: #10131a; border: 1px solid var(--border);
+                  border-radius: 4px; padding: 1px 5px; font-size: 13px;
+                  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+  .docview pre { background: #0b0e14; border: 1px solid var(--border);
+                 border-radius: 8px; padding: 12px 14px; overflow-x: auto;
+                 margin: 12px 0; }
+  .docview pre code { background: none; border: none; padding: 0; }
+  .docview table { display: block; overflow-x: auto; border-collapse: collapse;
+                   margin: 12px 0; font-size: 13.5px; }
+  .docview th, .docview td { border: 1px solid var(--border); padding: 6px 12px;
+                             text-align: left; vertical-align: top; }
+  .docview th { background: #1c2230; }
+  .docview tr:nth-child(even) td { background: rgba(255,255,255,.02); }
+  .docview blockquote { border-left: 3px solid var(--accent); margin: 12px 0;
+                        padding: 6px 16px; background: rgba(110,168,254,.07);
+                        border-radius: 0 8px 8px 0; color: var(--fg); }
+  .docview blockquote blockquote { border-left-color: var(--danger); }
+  .docview hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+  .doc-crumb { font-size: 12px; color: var(--dim); margin-bottom: 14px; }
+
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f5f6f8; --panel: #ffffff; --border: #d8dce4; --fg: #23272f;
+            --dim: #5a6373; --overlay: rgba(255,255,255,.94); }
+    .tabs button.active { background: #e8ecf4; }
+    #key { background: #fff; }
+    .pill, .rv button { background: #eef1f6; }
+    #doclist a:hover { background: #e8ecf4; }
+    #doclist .grp:hover { background: #e8ecf4; }
+    #doclist .grp-count { background: #e8ecf4; }
+    #doclist a.active { background: #dbe6fb; }
+    .docview code { background: #f0f2f6; }
+    .docview pre { background: #f6f8fa; }
+    .docview th { background: #eef1f6; }
+    .docview tr:nth-child(even) td { background: rgba(0,0,0,.02); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>📚 <span>Librarian</span> Memory</h1>
+  <nav class="tabs">
+    <button data-v="graph" class="active" data-i18n="tab.graph">Graph</button>
+    <button data-v="traces" data-i18n="tab.traces">Traces</button>
+    <button data-v="reviews" data-i18n="tab.reviews">Review</button>
+    <button data-v="docs" data-i18n="tab.docs">Docs</button>
+    <button id="fit" title="Fit graph to view" data-i18n-title="fit.title">⤢ Fit</button>
+  </nav>
+  <input id="key" type="password" placeholder="API key (Bearer)"
+    data-i18n-placeholder="key.placeholder">
+  <div id="status">–</div>
+  <button id="lang" data-i18n-title="lang.title" title="Switch language"></button>
+</header>
+<main>
+  <div class="view active" id="v-graph">
+    <canvas id="canvas"></canvas>
+    <div id="graphmode">
+      <button data-m="memory" class="active">🧠 Memory</button>
+      <button data-m="services">🔗 Services</button>
+      <input id="search" placeholder="🔍 Search (↵ expand)"
+        data-i18n-placeholder="search.placeholder"
+        title="Filter nodes · Enter expands namespaces to the match · Esc clears"
+        data-i18n-title="search.title">
+      <span id="scopesel" style="display:none">
+        <button data-s="direct" class="active" title="Focus shows direct neighbors"
+          data-i18n="scope.direct" data-i18n-title="scope.direct.title">Neighbors</button>
+        <button data-s="uses" title="Focus shows everything the service uses (transitively)"
+          data-i18n="scope.uses" data-i18n-title="scope.uses.title">uses ⇒</button>
+        <button data-s="usedBy" title="Focus shows everything that depends on it (transitively)"
+          data-i18n="scope.usedBy" data-i18n-title="scope.usedBy.title">⇐ used by</button>
+      </span>
+      <button id="alledges" style="display:none"
+        title="Also show indirect edges (A→C although A→B→C already exists)"
+        data-i18n="alledges" data-i18n-title="alledges.title">⇢ indirect</button>
+      <button id="nsback" style="display:none"
+        title="Collapse the most recently expanded namespace again"
+        data-i18n="nsback" data-i18n-title="nsback.title">⬆ Level</button>
+      <button id="ghosts" style="display:none"
+        title="Show/hide undocumented (ghost) nodes"
+        data-i18n-title="ghosts.title">👻</button>
+      <button id="isoclear" style="display:none"
+        title="Leave ego view - show all services"
+        data-i18n-title="isoclear.title"></button>
+      <button id="issues" title="Open items: orphans / missing docs"
+        data-i18n-title="issues.title">⚠</button>
+    </div>
+    <div id="legend"></div>
+    <div id="panel"></div>
+  </div>
+  <div class="view" id="v-traces"><div class="scroll" id="traces"></div></div>
+  <div class="view" id="v-reviews"><div class="scroll" id="reviews"></div></div>
+  <div class="view" id="v-docs">
+    <div class="docs-layout">
+      <nav id="doclist"></nav>
+      <article id="docview" class="docview">
+        <div class="empty" data-i18n="docs.pick">← Pick a document from the sidebar</div>
+      </article>
+    </div>
+  </div>
+</main>
+<script>
+"use strict";
+
+// ---------- i18n: inline string tables, English is the base language ----------
+// Placeholders look like {name}; values passed to t() are inserted as-is
+// (callers escape them where the string contains HTML).
+const I18N = {
+  en: {
+    "title": "Librarian - Memory Graph",
+    "tab.graph": "Graph",
+    "tab.traces": "Traces",
+    "tab.reviews": "Review",
+    "tab.docs": "Docs",
+    "fit.title": "Fit graph to view",
+    "lang.title": "Switch language",
+    "key.placeholder": "API key (Bearer)",
+    "search.placeholder": "🔍 Search (↵ expand)",
+    "search.title": "Filter nodes · Enter expands namespaces to the match · Esc clears",
+    "scope.direct": "Neighbors",
+    "scope.direct.title": "Focus shows direct neighbors",
+    "scope.uses": "uses ⇒",
+    "scope.uses.title": "Focus shows everything the service uses (transitively)",
+    "scope.usedBy": "⇐ used by",
+    "scope.usedBy.title": "Focus shows everything that depends on it (transitively)",
+    "alledges": "⇢ indirect",
+    "alledges.title": "Also show indirect edges (A→C although A→B→C already exists)",
+    "nsback": "⬆ Level",
+    "nsback.title": "Collapse the most recently expanded namespace again",
+    "ghosts.title": "Show/hide undocumented (ghost) nodes",
+    "isoclear.title": "Leave ego view - show all services",
+    "issues.title": "Open items: orphans / missing docs",
+    "docs.pick": "← Pick a document from the sidebar",
+    "err.401": "401 - enter the API key at the top right",
+    "issues.ghostsTitle": "👻 Missing docs",
+    "issues.orphansTitle": "🕳 Orphans (unlinked)",
+    "issues.meta": "{n} open - click jumps to the node",
+    "issues.suggestTip": "Name differs from a documented service only by separators - probably a typo in the docs",
+    "issues.suggest": "→ did you mean {name}?",
+    "issues.none": "Nothing open. 🎉",
+    "legend.toggle": "Click to show/hide",
+    "legend.orphan": "orphan",
+    "legend.dblSection": "Double-click: collapse/expand section",
+    "legend.service": "Service / namespace",
+    "legend.ghost": "missing docs (ghost)",
+    "legend.hint1": "📦 = namespace · double-click: expand · leaf: isolate",
+    "legend.hint2": "⬆ Level collapses · 👻 shows ghosts · ⟨+n⟩ = hidden single deps",
+    "status.concepts": "{n} concepts · {e} links",
+    "status.nodes": "{n} nodes · {e} links",
+    "svc.focus": "Focus {name} · ",
+    "svc.stats": "{n} nodes ({m} groups) · {e} edges",
+    "svc.indirectShown": " · {n} indirect",
+    "svc.indirectHidden": " · {n} indirect hidden",
+    "svc.ghostsHidden": " · {n} ghosts hidden",
+    "iso.only": "✕ only {name}",
+    "iso.focus": "Focus",
+    "doc.panelMeta": "Docs (read-only)",
+    "doc.readonly": "read-only",
+    "ghost.meta": "Referenced as a dependency but has no docs yet.",
+    "ghost.typo": "<blockquote>Probably a <b>naming typo</b>: the documented service <code>{sug}</code> exists - it differs only by separators (<code>.</code>/<code>-</code>). In the referencing doc, change <code>dependencies[].service</code> to <code>{sug}</code> and the ghost goes away.</blockquote>",
+    "ghost.create": "<p>Create it at <code>services/{name}.md</code> (template: <code>templates/service-template.md</code>) - with <code>service: {name}</code> in the frontmatter the ghost disappears automatically.</p>",
+    "ns.meta": "{n} services · {i} internal · {x} external dependencies<br>Double-click in the graph expands · click on a service jumps to it",
+    "traces.time": "Time",
+    "traces.client": "Client",
+    "traces.op": "Op",
+    "traces.query": "Query/Fact",
+    "traces.source": "Source",
+    "traces.detail": "Detail",
+    "traces.empty": "No traces yet.",
+    "docs.empty": "Docs mirror is empty.",
+    "docs.overview": "Overview",
+    "rv.merge": "⚡ Merge",
+    "rv.done": "Done",
+    "rv.dismiss": "Dismiss",
+    "rv.merging": " running merge (may take minutes)...",
+    "rv.error": "Error: ",
+    "rv.empty": "Review queue is empty. 🎉",
+  },
+  de: {
+    "title": "Librarian - Memory-Graph",
+    "tab.graph": "Graph",
+    "tab.traces": "Traces",
+    "tab.reviews": "Review",
+    "tab.docs": "Doku",
+    "fit.title": "Graph einpassen",
+    "lang.title": "Sprache wechseln",
+    "key.placeholder": "API-Key (Bearer)",
+    "search.placeholder": "🔍 Suche (↵ aufklappen)",
+    "search.title": "Knoten filtern · Enter klappt Namensräume zum Treffer auf · Esc löscht",
+    "scope.direct": "Nachbarn",
+    "scope.direct.title": "Fokus zeigt direkte Nachbarn",
+    "scope.uses": "nutzt ⇒",
+    "scope.uses.title": "Fokus zeigt alles, was der Service (transitiv) nutzt",
+    "scope.usedBy": "⇐ hängt dran",
+    "scope.usedBy.title": "Fokus zeigt alles, was (transitiv) von ihm abhängt",
+    "alledges": "⇢ indirekte",
+    "alledges.title": "Auch indirekte Kanten zeigen (A→C, obwohl schon A→B→C existiert)",
+    "nsback": "⬆ Ebene",
+    "nsback.title": "Zuletzt aufgeklappten Namensraum wieder zuklappen",
+    "ghosts.title": "Undokumentierte (Ghost-)Knoten ein-/ausblenden",
+    "isoclear.title": "Ego-Ansicht verlassen - alle Services zeigen",
+    "issues.title": "Offene Punkte: Orphans / fehlende Doku",
+    "docs.pick": "← Dokument aus der Seitenleiste wählen",
+    "err.401": "401 - API-Key oben rechts eintragen",
+    "issues.ghostsTitle": "👻 Fehlende Doku",
+    "issues.orphansTitle": "🕳 Orphans (unverlinkt)",
+    "issues.meta": "{n} offen - Klick springt zum Knoten",
+    "issues.suggestTip": "Name (nur durch Trenner) unterschiedlich zu einem dok. Service - vermutlich Tippfehler in den Docs",
+    "issues.suggest": "→ meinte {name}?",
+    "issues.none": "Nichts offen. 🎉",
+    "legend.toggle": "Klick blendet ein/aus",
+    "legend.orphan": "orphan",
+    "legend.dblSection": "Doppelklick: Sektion ein-/ausklappen",
+    "legend.service": "Service / Namensraum",
+    "legend.ghost": "fehlende Doku (Ghost)",
+    "legend.hint1": "📦 = Namensraum · Doppelklick: aufklappen · Blatt: isolieren",
+    "legend.hint2": "⬆ Ebene klappt zu · 👻 zeigt Ghosts · ⟨+n⟩ = versteckte Einzel-Deps",
+    "status.concepts": "{n} Konzepte · {e} Links",
+    "status.nodes": "{n} Knoten · {e} Links",
+    "svc.focus": "Fokus {name} · ",
+    "svc.stats": "{n} Knoten ({m} Gruppen) · {e} Kanten",
+    "svc.indirectShown": " · {n} indirekte",
+    "svc.indirectHidden": " · {n} indirekte aus",
+    "svc.ghostsHidden": " · {n} Ghosts versteckt",
+    "iso.only": "✕ nur {name}",
+    "iso.focus": "Fokus",
+    "doc.panelMeta": "Doku (read-only)",
+    "doc.readonly": "read-only",
+    "ghost.meta": "Wird als Abhängigkeit referenziert, hat aber noch keine Doku.",
+    "ghost.typo": "<blockquote>Vermutlich <b>Namens-Tippfehler</b>: es gibt den dokumentierten Service <code>{sug}</code> - nur durch Trenner (<code>.</code>/<code>-</code>) unterschiedlich. In der referenzierenden Doku <code>dependencies[].service</code> auf <code>{sug}</code> angleichen, dann verschwindet der Geist.</blockquote>",
+    "ghost.create": "<p>Anlegen unter <code>services/{name}.md</code> (Vorlage: <code>templates/service-template.md</code>) - mit <code>service: {name}</code> im Frontmatter verschwindet der Geist automatisch.</p>",
+    "ns.meta": "{n} Services · {i} interne · {x} externe Abhängigkeiten<br>Doppelklick im Graph klappt auf · Klick auf einen Service springt hin",
+    "traces.time": "Zeit",
+    "traces.client": "Client",
+    "traces.op": "Op",
+    "traces.query": "Query/Fakt",
+    "traces.source": "Quelle",
+    "traces.detail": "Detail",
+    "traces.empty": "Noch keine Traces.",
+    "docs.empty": "docs-mirror leer.",
+    "docs.overview": "Übersicht",
+    "rv.merge": "⚡ Mergen",
+    "rv.done": "Erledigt",
+    "rv.dismiss": "Verwerfen",
+    "rv.merging": " führt Merge aus (kann Minuten dauern)...",
+    "rv.error": "Fehler: ",
+    "rv.empty": "Review-Queue ist leer. 🎉",
+  },
+};
+// Stored choice wins, otherwise follow the browser language.
+let LANG;
+try { LANG = localStorage.getItem("lang"); } catch (e) { LANG = null; }
+if (!I18N[LANG]) LANG = (navigator.language || "").startsWith("de") ? "de" : "en";
+const t = (key, vars) =>
+  (I18N[LANG][key] ?? I18N.en[key] ?? key)
+    .replace(/\{(\w+)\}/g, (m, k) => vars && k in vars ? vars[k] : m);
+
+// Apply translations to the static markup (data-i18n*, document title, <html lang>).
+function applyI18n() {
+  document.documentElement.lang = LANG;
+  document.title = t("title");
+  document.querySelectorAll("[data-i18n]").forEach(el =>
+    el.textContent = t(el.dataset.i18n));
+  document.querySelectorAll("[data-i18n-placeholder]").forEach(el =>
+    el.placeholder = t(el.dataset.i18nPlaceholder));
+  document.querySelectorAll("[data-i18n-title]").forEach(el =>
+    el.title = t(el.dataset.i18nTitle));
+}
+// The toggle shows the language it switches to; a reload re-renders everything.
+const langBtn = document.getElementById("lang");
+langBtn.textContent = LANG === "de" ? "EN" : "DE";
+langBtn.onclick = () => {
+  try { localStorage.setItem("lang", LANG === "de" ? "en" : "de"); } catch (e) {}
+  location.reload();
+};
+applyI18n();
+
+const $ = s => document.querySelector(s);
+const SECTION_COLORS = {people:"--c-people", projects:"--c-projects",
+  infrastructure:"--c-infrastructure", knowledge:"--c-knowledge",
+  preferences:"--c-preferences", events:"--c-events", inbox:"--c-inbox",
+  service:"--c-infrastructure", ghost:"--c-inbox"};
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+// ---------- API (key from localStorage, Authorization header) ----------
+const keyInput = $("#key");
+keyInput.value = localStorage.getItem("librarian_key") || "";
+let keyTimer;
+keyInput.addEventListener("input", () => {
+  localStorage.setItem("librarian_key", keyInput.value.trim());
+  clearTimeout(keyTimer);
+  keyTimer = setTimeout(boot, 500);   // reload automatically after typing
+});
+$("#fit").addEventListener("click", () => fit());
+async function api(path) {
+  const r = await fetch(path, {headers: {Authorization: "Bearer " + keyInput.value.trim()}});
+  if (r.status === 401) throw new Error(t("err.401"));
+  if (!r.ok) throw new Error(r.status + " " + r.statusText);
+  return r.json();
+}
+const setStatus = s => $("#status").textContent = s;
+
+// ---------- Tabs ----------
+const TAB_VIEWS = ["graph", "traces", "reviews", "docs"];
+function selectTab(v, {updateHash = true} = {}) {
+  if (!TAB_VIEWS.includes(v)) v = "graph";
+  document.querySelectorAll(".tabs button").forEach(x =>
+    x.classList.toggle("active", x.dataset.v === v));
+  document.querySelectorAll(".view").forEach(el =>
+    el.classList.toggle("active", el.id === "v-" + v));
+  if (updateHash) location.hash = v;
+  if (v === "traces") loadTraces();
+  if (v === "reviews") loadReviews();
+  if (v === "docs") loadDocs();
+}
+document.querySelectorAll(".tabs button[data-v]").forEach(b =>
+  b.onclick = () => selectTab(b.dataset.v));
+// Respect browser back/forward and manual hash changes
+addEventListener("hashchange", () =>
+  selectTab(location.hash.slice(1), {updateHash: false}));
+
+// ---------- Graph: small built-in force simulation ----------
+const canvas = $("#canvas"), ctx = canvas.getContext("2d");
+let nodes = [], edges = [], nodeByPath = {};
+let view = {x: 0, y: 0, k: 1}, dragging = null, panning = null, hot = 120;
+let hovered = null, adj = new Map(), labelMinDegree = 0;
+let layoutMode = "force", hiddenSections = new Set(), searchSet = null;
+let focusScope = "direct", focusCache = {key: null, set: null};
+let collapsedSections = new Set(), baseGraph = null;
+let svcData = null, svcIsolated = null, showRedundant = false, hoveredEdge = null;
+let expandedNs = new Set(), showGhosts = false;
+
+function resize() {
+  canvas.width = canvas.clientWidth * devicePixelRatio;
+  canvas.height = canvas.clientHeight * devicePixelRatio;
+}
+addEventListener("resize", () => { resize(); });
+
+let graphMode = "memory";
+document.querySelectorAll("#graphmode button").forEach(b => b.onclick = () => {
+  graphMode = b.dataset.m;
+  document.querySelectorAll("#graphmode button").forEach(x =>
+    x.classList.toggle("active", x === b));
+  selected = null; hovered = null; hoveredEdge = null; svcIsolated = null;
+  hiddenSections.clear(); collapsedSections.clear(); expandedNs.clear();
+  showGhosts = false;
+  $("#panel").classList.remove("open");
+  loadGraph().catch(e => setStatus(e.message));
+});
+
+// ---------- Focus scope (service mode): direct or transitive ----------
+document.querySelectorAll("#scopesel button").forEach(b => b.onclick = () => {
+  focusScope = b.dataset.s;
+  document.querySelectorAll("#scopesel button").forEach(x =>
+    x.classList.toggle("active", x === b));
+  focusCache = {key: null, set: null};
+});
+
+// Focus set: direct neighbors - or, in service mode, optionally the
+// transitive closure along the arrows ("what it uses" / "what depends on it")
+function focusSetFor(path) {
+  const key = graphMode + "|" + focusScope + "|" + path;
+  if (focusCache.key === key) return focusCache.set;
+  let set;
+  if (graphMode !== "services" || focusScope === "direct") {
+    set = adj.get(path) || new Set([path]);
+  } else {
+    set = new Set([path]);
+    const queue = [path];
+    while (queue.length) {
+      const p = queue.shift();
+      for (const e of edges) {
+        let next = null;
+        if (focusScope === "uses") {
+          if (e.src === p) next = e.dst;
+          else if (e.both && e.dst === p) next = e.src;
+        } else {
+          if (e.dst === p) next = e.src;
+          else if (e.both && e.src === p) next = e.dst;
+        }
+        if (next && !set.has(next)) { set.add(next); queue.push(next); }
+      }
+    }
+  }
+  focusCache = {key, set};
+  return set;
+}
+
+// ---------- Open items: orphans (memory) / ghosts (services) ----------
+function issueNodes() {
+  return graphMode === "services"
+    ? (svcData ? svcData.nodes.filter(n => n.ghost)
+                   .map(n => ({path: "svc:" + n.name, title: n.name, suggest: n.suggest}))
+               : nodes.filter(n => n.ghost))
+    : (baseGraph ? baseGraph.nodes : []).filter(n => (n.degree || 0) === 0);
+}
+function updateIssueButton() { $("#issues").textContent = "⚠ " + issueNodes().length; }
+$("#issues").onclick = () => {
+  const list = issueNodes();
+  const panel = $("#panel");
+  panel.innerHTML = `<button class="close">✕</button>
+    <h2>${graphMode === "services" ? t("issues.ghostsTitle") : t("issues.orphansTitle")}</h2>
+    <div class="meta">${t("issues.meta", {n: list.length})}</div>` +
+    (list.length
+      ? "<ul>" + list.map(n =>
+          `<li><a data-p="${esc(n.path)}">${esc(n.title)}</a>` +
+          (n.suggest ? ` <span class="pill" title="${esc(t("issues.suggestTip"))}">`
+            + esc(t("issues.suggest", {name: n.suggest})) + `</span>` : "") +
+          `</li>`).join("") + "</ul>"
+      : `<p>${t("issues.none")}</p>`);
+  panel.classList.add("open");
+  panel.querySelector(".close").onclick = () => panel.classList.remove("open");
+  panel.querySelectorAll("a[data-p]").forEach(a => a.onclick = () => {
+    let n = nodeByPath[a.dataset.p];
+    if (!n && graphMode === "memory" && baseGraph) {   // hidden in a collapsed section
+      const bn = baseGraph.nodes.find(x => x.path === a.dataset.p);
+      if (bn) { collapsedSections.delete(bn.section); buildMemoryView();
+                n = nodeByPath[a.dataset.p]; }
+    }
+    if (!n && graphMode === "services") {   // hidden in namespace/ego view: expand
+      const nm = a.dataset.p.replace(/^svc:/, "");
+      const segs = nm.split("."); let acc = "";
+      for (let i = 0; i < segs.length - 1; i++) {
+        acc = i ? acc + "." + segs[i] : segs[i]; expandedNs.add(acc);
+      }
+      showGhosts = true; svcIsolated = null;
+      buildServiceView();
+      n = nodeByPath[a.dataset.p];
+    }
+    if (!n) return;
+    selected = n;
+    view.k = Math.max(view.k, 1.1);
+    view.x = canvas.clientWidth / 2 - n.x * view.k;
+    view.y = canvas.clientHeight / 2 - n.y * view.k;
+  });
+};
+
+// ---------- Search: matches act like a focus set ----------
+// Live: highlights visible nodes, including namespace metas whose members
+// match (so you can see which bubble holds the hit). Enter (services):
+// expands all namespaces with hits until the services show up as leaves.
+const searchInput = $("#search");
+searchInput.addEventListener("input", updateSearch);
+searchInput.addEventListener("keydown", e => {
+  if (e.key === "Escape") { searchInput.value = ""; updateSearch(); searchInput.blur(); }
+  else if (e.key === "Enter" && graphMode === "services") revealSearchMatches();
+});
+function updateSearch() {
+  const q = searchInput.value.trim().toLowerCase();
+  if (!q) { searchSet = null; return; }
+  searchSet = new Set(nodes.filter(n =>
+    (n.title && n.title.toLowerCase().includes(q)) ||
+    (n.name && n.name.toLowerCase().includes(q)) ||
+    (n.members && n.members.some(m => m.toLowerCase().includes(q)))
+  ).map(n => n.path));
+}
+function revealSearchMatches() {
+  const q = searchInput.value.trim().toLowerCase();
+  if (!svcData || q.length < 2) return;
+  let first = null;
+  for (const n of svcData.nodes) {
+    if (!n.name.toLowerCase().includes(q)) continue;
+    if (n.ghost) showGhosts = true;
+    const segs = n.name.split("."); let acc = "";
+    for (let i = 0; i < segs.length; i++) {   // expand all prefixes incl. the full name
+      acc = i ? acc + "." + segs[i] : segs[i]; expandedNs.add(acc);
+    }
+    first = first || n.name;
+  }
+  svcIsolated = null;
+  buildServiceView();                          // calls updateSearch -> highlight
+  const node = first && (nodeByPath["svc:" + first] || nodeByPath["ns:" + first]);
+  if (node) {
+    selected = node;
+    view.k = Math.max(view.k, 1.1);
+    view.x = canvas.clientWidth / 2 - node.x * view.k;
+    view.y = canvas.clientHeight / 2 - node.y * view.k;
+  }
+}
+
+// ---------- Legend with clickable section filters ----------
+function renderLegend(entries, extraHtml) {
+  $("#legend").innerHTML = entries.map(([sec, label, swatch]) =>
+    `<div data-sec="${sec}" class="${hiddenSections.has(sec) ? "off" : ""}"
+          title="${esc(t("legend.toggle"))}">${swatch}${label}</div>`).join("")
+    + (extraHtml || "");
+  $("#legend").querySelectorAll("div[data-sec]").forEach(el => el.onclick = () => {
+    const s = el.dataset.sec;
+    hiddenSections.has(s) ? hiddenSections.delete(s) : hiddenSections.add(s);
+    el.classList.toggle("off");
+  });
+}
+
+// Initial node positions on a spiral, radius from the node degree.
+function seedPositions(list) {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  return list.map((n, i) => ({...n,
+    x: W/2 + Math.cos(i * 2.4) * (60 + 8*i), y: H/2 + Math.sin(i * 2.4) * (60 + 8*i),
+    vx: 0, vy: 0, r: 7 + Math.min(9, (n.degree || 0) * 1.6)}));
+}
+
+// Neighborhoods (for focus highlighting) + label threshold: when zoomed out
+// only the ~30 best-connected nodes get a label.
+function finalizeGraph() {
+  // Merge opposing pairs (A->B + B->A) into ONE double-arrow edge
+  const byPair = new Map(), merged = [];
+  for (const e of edges) {
+    const k = e.src < e.dst ? e.src + "|" + e.dst : e.dst + "|" + e.src;
+    const prev = byPair.get(k);
+    if (!prev) { byPair.set(k, e); merged.push(e); continue; }
+    if (prev.src !== e.src) prev.both = true;
+    if (e.label && e.label !== prev.label)
+      prev.label = prev.label ? prev.label + " ⇄ " + e.label : e.label;
+  }
+  edges = merged;
+  adj = new Map(nodes.map(n => [n.path, new Set([n.path])]));
+  for (const e of edges) { adj.get(e.src).add(e.dst); adj.get(e.dst).add(e.src); }
+  const degs = nodes.map(n => n.degree || 0).sort((a, b) => b - a);
+  labelMinDegree = nodes.length > 30 ? Math.max(degs[29], 1) : 0;
+  focusCache = {key: null, set: null};
+  updateSearch();
+}
+
+// ---------- Namespace collapse (service mode) ----------
+// Dotted service names (acme.core.service.foo) form a hierarchy. A name is
+// reduced to its shortest prefix that is NOT expanded.
+// Default: all top segments expanded -> 2-segment groups; flat names
+// (mongodb, keycloak ...) stay themselves.
+function svcGroupKey(name) {
+  const segs = name.split(".");
+  let key = segs[0], i = 1;
+  while (i < segs.length && expandedNs.has(key)) { key += "." + segs[i]; i++; }
+  return key;
+}
+// Fresh load: open the top segments so the initial view shows 2-segment
+// namespaces instead of a handful of huge roots.
+function seedNamespaces(names) {
+  expandedNs = new Set();
+  for (const nm of names) {
+    const segs = nm.split(".");
+    if (segs.length > 1) expandedNs.add(segs[0]);
+  }
+}
+
+// Service mode: layered layout instead of force - columns by dependency depth,
+// consumers on the left, base infrastructure on the right, all arrows point right.
+function serviceLayout() {
+  const out = new Map(nodes.map(n => [n.path, []]));
+  for (const e of edges) {
+    out.get(e.src).push(e.dst);
+    if (e.both) out.get(e.dst).push(e.src);
+  }
+  const depth = new Map(), visiting = new Set();
+  const calc = p => {
+    if (depth.has(p)) return depth.get(p);
+    if (visiting.has(p)) return 0;          // cycle: cut it right here
+    visiting.add(p);
+    const v = out.get(p).length ? 1 + Math.max(...out.get(p).map(calc)) : 0;
+    visiting.delete(p); depth.set(p, v);
+    return v;
+  };
+  nodes.forEach(n => calc(n.path));
+  const maxD = Math.max(...depth.values());
+  const cols = [];
+  for (const n of nodes) {
+    const c = maxD - depth.get(n.path);
+    (cols[c] = cols[c] || []).push(n);
+  }
+  // Rows: start alphabetically, then per column align to the barycenter of
+  // the already placed neighbors (fewer crossings)
+  const H = canvas.clientHeight || 600, yOf = new Map();
+  cols.forEach((col, ci) => {
+    col.sort((a, b) => a.title.localeCompare(b.title));
+    if (ci > 0) {
+      col.forEach(n => {
+        const ys = [...adj.get(n.path)].map(p => yOf.get(p))
+                    .filter(y => y !== undefined);
+        n._bc = ys.length ? ys.reduce((s, y) => s + y, 0) / ys.length : H / 2;
+      });
+      col.sort((a, b) => a._bc - b._bc);
+    }
+    col.forEach((n, ri) => {
+      n.x = 90 + ci * 230;
+      n.y = H / 2 + (ri - (col.length - 1) / 2) * 74;
+      n.vx = n.vy = 0;
+      yOf.set(n.path, n.y);
+    });
+  });
+}
+
+// Build the memory view from the base graph; collapsed sections are
+// bundled into one meta node (double-click collapses/expands)
+function buildMemoryView() {
+  const prev = Object.fromEntries(nodes.map(n => [n.path, n]));
+  const secOf = {};
+  baseGraph.nodes.forEach(n => secOf[n.path] = n.section);
+  const mapP = p => collapsedSections.has(secOf[p]) ? "sec:" + secOf[p] : p;
+  const shown = baseGraph.nodes.filter(n => !collapsedSections.has(n.section));
+  const metas = [...collapsedSections].map(s => ({
+    path: "sec:" + s, meta: true, section: s, degree: 0,
+    title: "📦 " + s + " ("
+           + baseGraph.nodes.filter(n => n.section === s).length + ")",
+  }));
+  nodes = seedPositions(shown.map(n => ({...n})).concat(metas));
+  for (const n of nodes) {
+    const old = prev[n.path];
+    if (old) { n.x = old.x; n.y = old.y; continue; }
+    if (n.meta) {              // meta starts at the centroid of its members
+      const mem = Object.values(prev).filter(o => o.section === n.section && !o.meta);
+      if (mem.length) {
+        n.x = mem.reduce((a, m) => a + m.x, 0) / mem.length;
+        n.y = mem.reduce((a, m) => a + m.y, 0) / mem.length;
+      }
+    } else {                   // freshly expanded: scatter around the old meta
+      const m = prev["sec:" + n.section];
+      if (m) { n.x = m.x + Math.random() * 90 - 45;
+               n.y = m.y + Math.random() * 90 - 45; }
+    }
+  }
+  nodeByPath = Object.fromEntries(nodes.map(n => [n.path, n]));
+  edges = baseGraph.edges.map(e => ({src: mapP(e.src), dst: mapP(e.dst)}))
+    .filter(e => e.src !== e.dst && nodeByPath[e.src] && nodeByPath[e.dst]);
+  finalizeGraph();
+  for (const n of nodes) if (n.meta) {
+    n.degree = edges.filter(e => e.src === n.path || e.dst === n.path).length;
+    n.r = 14;
+  }
+  hot = Math.max(hot, 200);
+}
+
+async function loadGraph() {
+  if (graphMode === "services") return loadServiceGraph();
+  const g = await api("/api/graph");
+  baseGraph = g;
+  layoutMode = "force";
+  $("#scopesel").style.display = "none";
+  focusScope = "direct";
+  buildMemoryView();
+  hot = 400;
+  setStatus(t("status.concepts", {n: nodes.length, e: edges.length}));
+  renderLegend(Object.entries(SECTION_COLORS)
+      .filter(([s]) => !["service", "ghost"].includes(s))
+      .map(([s, v]) => [s, s, `<i style="background:${css(v)}"></i>`]),
+    `<div><i style="background:none;border:2px solid ${css("--danger")}"></i>${t("legend.orphan")}</div>
+     <div>${t("legend.dblSection")}</div>`);
+  updateIssueButton();
+  updateSvcButtons();
+}
+
+async function loadServiceGraph() {
+  svcData = await api("/api/deps");
+  svcIsolated = null;
+  showGhosts = false;
+  seedNamespaces(svcData.nodes.map(n => n.name));
+  buildServiceView();
+  renderLegend([
+      ["service", t("legend.service"),
+       `<i style="background:${css("--c-infrastructure")}"></i>`],
+      ["ghost", t("legend.ghost"),
+       `<i style="background:none;border:2px dashed ${css("--danger")}"></i>`],
+    ],
+    `<div>${t("legend.hint1")}</div>
+     <div>${t("legend.hint2")}</div>`);
+  $("#scopesel").style.display = "";
+}
+
+// Edge A->C is redundant if C is also reachable from A via a longer path
+// (through a direct successor w != C) - transitive reduction.
+function markRedundant() {
+  const out = new Map(nodes.map(n => [n.path, []]));
+  for (const e of edges) {
+    out.get(e.src).push(e.dst);
+    if (e.both) out.get(e.dst).push(e.src);
+  }
+  const reaches = (from, to, block) => {
+    const stack = [from], seen = new Set([from, block]);
+    while (stack.length) {
+      const p = stack.pop();
+      if (p === to) return true;
+      for (const q of out.get(p) || [])
+        if (!seen.has(q)) { seen.add(q); stack.push(q); }
+    }
+    return false;
+  };
+  for (const e of edges)
+    e.redundant = !e.both &&
+      out.get(e.src).some(w => w !== e.dst && reaches(w, e.dst, e.src));
+}
+
+// Rebuild the service view. Pipeline works on names, paths are assigned only
+// at the end: ego filter -> fold single satellites into a badge ->
+// ghost toggle -> namespace collapse -> redundant edges -> layered layout.
+function buildServiceView() {
+  const g = svcData;
+  hoveredEdge = null;
+  const ghost = {}, ndoc = {};
+  for (const n of g.nodes) { ghost[n.name] = n.ghost; ndoc[n.name] = n.doc; }
+  let names = new Set(g.nodes.map(n => n.name));
+  let E = g.edges.filter(e => names.has(e.src) && names.has(e.dst))
+                 .map(e => ({s: e.src, d: e.dst, label: e.label}));
+
+  // 1) Ego: everything the service uses (transitively) + everything depending on it
+  if (svcIsolated) {
+    const root = svcIsolated.replace(/^svc:/, "");
+    const keep = new Set([root]);
+    for (const dir of ["out", "in"]) {
+      const q = [root], seen = new Set([root]);
+      while (q.length) {
+        const p = q.shift();
+        for (const e of E) {
+          const nx = dir === "out" ? (e.s === p ? e.d : null) : (e.d === p ? e.s : null);
+          if (nx && !seen.has(nx)) { seen.add(nx); keep.add(nx); q.push(nx); }
+        }
+      }
+    }
+    names = new Set([...names].filter(n => keep.has(n)));
+    E = E.filter(e => keep.has(e.s) && keep.has(e.d));
+  }
+
+  // 2) Single-satellite ghosts (used once, use nothing themselves) never get
+  // their own node - they are bundled into a (+n) badge on their user.
+  const indeg = {}, outdeg = {};
+  for (const e of E) { outdeg[e.s] = (outdeg[e.s]||0)+1; indeg[e.d] = (indeg[e.d]||0)+1; }
+  const badge = {}, satellite = n => ghost[n] && (indeg[n]||0) <= 1 && !outdeg[n];
+  for (const e of E) if (satellite(e.d)) badge[e.s] = (badge[e.s]||0) + 1;
+  names = new Set([...names].filter(n => !satellite(n)));
+  E = E.filter(e => names.has(e.s) && names.has(e.d));
+
+  // 3) Ghost toggle: optionally hide the remaining (multiply used) ghosts
+  if (!showGhosts) {
+    names = new Set([...names].filter(n => !ghost[n]));
+    E = E.filter(e => names.has(e.s) && names.has(e.d));
+  }
+
+  // 4) Namespace collapse: names -> group keys; groups with >1 member
+  // (or truncation) become one package meta node.
+  const groups = new Map();
+  for (const n of names) {
+    const k = svcGroupKey(n);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(n);
+  }
+  const keyOf = {}; let ns = [];
+  for (const [k, mem] of groups) {
+    if (mem.length === 1 && mem[0] === k) {          // actual leaf service
+      const nm = mem[0];
+      keyOf[nm] = "svc:" + nm;
+      ns.push({path: "svc:" + nm, name: nm, title: nm,
+               section: ghost[nm] ? "ghost" : "service", ghost: !!ghost[nm],
+               doc: ndoc[nm], badge: badge[nm] || 0});
+    } else {                                          // namespace meta
+      const path = "ns:" + k, allGhost = mem.every(nm => ghost[nm]);
+      for (const nm of mem) keyOf[nm] = path;
+      ns.push({path, name: k, meta: true, members: mem,
+               title: "📦 " + k + " (" + mem.length + ")",
+               section: allGhost ? "ghost" : "service", ghost: allGhost});
+    }
+  }
+  // Redirect edges to group paths, drop self-loops + duplicates
+  const seenE = new Set(); let es = [];
+  for (const e of E) {
+    const s = keyOf[e.s], t = keyOf[e.d];
+    if (!s || !t || s === t) continue;
+    const kk = s + "|" + t;
+    if (seenE.has(kk)) continue;
+    seenE.add(kk);
+    es.push({src: s, dst: t, label: e.label});
+  }
+
+  // 5) Degrees (for radius/label threshold) + positions + layout
+  const deg = {};
+  for (const e of es) { deg[e.src] = (deg[e.src]||0)+1; deg[e.dst] = (deg[e.dst]||0)+1; }
+  ns.forEach(n => n.degree = deg[n.path] || 0);
+  nodes = seedPositions(ns);
+  for (const n of nodes) if (n.meta)
+    n.r = 11 + Math.min(13, Math.round(Math.log2(n.members.length + 1) * 2.5));
+  nodeByPath = Object.fromEntries(nodes.map(n => [n.path, n]));
+  edges = es;
+  finalizeGraph();
+  markRedundant();
+  const nRed = edges.filter(e => e.redundant).length;
+  if (!showRedundant && nRed) {
+    edges = edges.filter(e => !e.redundant);
+    adj = new Map(nodes.map(n => [n.path, new Set([n.path])]));
+    for (const e of edges) { adj.get(e.src).add(e.dst); adj.get(e.dst).add(e.src); }
+    focusCache = {key: null, set: null};
+  }
+  layoutMode = "layers";
+  serviceLayout();
+  hot = 0;
+  fit();
+  const metaN = nodes.filter(n => n.meta).length;
+  const hiddenGh = svcData.nodes.filter(n => n.ghost).length
+                   - nodes.filter(n => n.ghost).length;
+  setStatus((svcIsolated ? t("svc.focus", {name: nodeByPath[svcIsolated]?.title || ""}) : "")
+            + t("svc.stats", {n: nodes.length, m: metaN, e: edges.length})
+            + (nRed ? t(showRedundant ? "svc.indirectShown" : "svc.indirectHidden", {n: nRed}) : "")
+            + (hiddenGh > 0 ? t("svc.ghostsHidden", {n: hiddenGh}) : ""));
+  updateIssueButton();
+  updateSvcButtons();
+}
+
+function updateSvcButtons() {
+  const svc = graphMode === "services";
+  $("#alledges").style.display = svc ? "" : "none";
+  $("#ghosts").style.display = svc ? "" : "none";
+  $("#ghosts").classList.toggle("active", showGhosts);
+  const nb = $("#nsback");
+  const deep = [...expandedNs].some(k => k.includes("."));
+  nb.style.display = svc && deep ? "" : "none";
+  const iso = $("#isoclear");
+  iso.style.display = svc && svcIsolated ? "" : "none";
+  if (svcIsolated) iso.textContent = t("iso.only", {name: nodeByPath[svcIsolated]?.title || t("iso.focus")});
+}
+$("#alledges").onclick = () => {
+  showRedundant = !showRedundant;
+  $("#alledges").classList.toggle("active", showRedundant);
+  if (graphMode === "services") buildServiceView();
+};
+$("#ghosts").onclick = () => {
+  showGhosts = !showGhosts;
+  if (graphMode === "services") buildServiceView();
+};
+$("#nsback").onclick = () => {              // collapse the deepest expanded namespace
+  let victim = null;
+  for (const k of expandedNs)
+    if (k.includes(".") && (!victim || k.length > victim.length)) victim = k;
+  if (victim) { expandedNs.delete(victim); buildServiceView(); }
+};
+$("#isoclear").onclick = () => { svcIsolated = null; buildServiceView(); };
+
+function tick() {
+  if (hot <= 0 || layoutMode === "layers") return;
+  hot--;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  // Repulsion grows with the node count - pulls dense graphs apart
+  const rep = 900 + nodes.length * 12;
+  for (const a of nodes) {
+    // Repulsion (min distance prevents explosions on overlap)
+    for (const b of nodes) {
+      if (a === b) continue;
+      const dx = a.x - b.x, dy = a.y - b.y;
+      const d2 = Math.max(dx*dx + dy*dy, 100);
+      if (d2 < 90000) { const f = rep / d2; a.vx += dx * f; a.vy += dy * f; }
+    }
+    // Centering
+    a.vx += (W/2 - a.x) * 0.003; a.vy += (H/2 - a.y) * 0.003;
+  }
+  // Springs: force is CAPPED and does not scale with distance;
+  // rest length grows with the end nodes' degree (hubs get room)
+  for (const e of edges) {
+    const s = nodeByPath[e.src], t = nodeByPath[e.dst];
+    const dx = t.x - s.x, dy = t.y - s.y;
+    const d = Math.sqrt(dx*dx + dy*dy) || 1;
+    const rest = Math.min(240, 100 + 8 * ((s.degree || 0) + (t.degree || 0)));
+    const f = Math.max(-4, Math.min(4, (d - rest) * 0.02));
+    s.vx += dx/d * f; s.vy += dy/d * f;
+    t.vx -= dx/d * f; t.vy -= dy/d * f;
+  }
+  const clamp = v => Math.max(-20, Math.min(20, v));
+  for (const n of nodes) {
+    if (n === dragging) continue;
+    n.x += (n.vx = clamp(n.vx * 0.65)); n.y += (n.vy = clamp(n.vy * 0.65));
+  }
+  if (hot === 1) fit();  // after settling: fit the graph into view automatically
+}
+
+function fit() {
+  if (!nodes.length) return;
+  const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+  const minX = Math.min(...xs) - 60, maxX = Math.max(...xs) + 60;
+  const minY = Math.min(...ys) - 60, maxY = Math.max(...ys) + 60;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  view.k = Math.min(2, W / (maxX - minX), H / (maxY - minY));
+  view.x = (W - (minX + maxX) * view.k) / 2;
+  view.y = (H - (minY + maxY) * view.k) / 2;
+}
+
+// Arrowhead at node n, arriving from direction (fx,fy) - for curved edges
+// this is the control point, so the head follows the curve
+function arrowHead(n, fx, fy) {
+  const dx = n.x - fx, dy = n.y - fy, d = Math.hypot(dx, dy) || 1;
+  const ux = dx / d, uy = dy / d;
+  const ax = n.x - ux * (n.r + 4), ay = n.y - uy * (n.r + 4);
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(ax - ux * 8 - uy * 4, ay - uy * 8 + ux * 4);
+  ctx.lineTo(ax - ux * 8 + uy * 4, ay - uy * 8 - ux * 4);
+  ctx.closePath();
+  ctx.fillStyle = css("--dim"); ctx.fill();
+}
+
+let selected = null;
+function draw() {
+  tick();
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.translate(view.x, view.y); ctx.scale(view.k, view.k);
+  // Focus (hover/selection) or search hits: draw only the relevant subset
+  // fully, dim the rest; sections hidden via the legend are skipped entirely
+  const focus = hovered || selected;
+  const nbrs = focus && focusSetFor(focus.path);
+  const hiddenN = n => hiddenSections.has(n.section);
+  const dimmed = n => focus ? !nbrs.has(n.path)
+                    : searchSet ? !searchSet.has(n.path) : false;
+  const cBorder = css("--border"), cAccent = css("--accent"), cDim = css("--dim");
+  for (const e of edges) {
+    const s = nodeByPath[e.src], t = nodeByPath[e.dst];
+    if (hiddenN(s) || hiddenN(t)) continue;
+    // transitive focus: all edges INSIDE the closure show the chain
+    const active = focus
+      ? (graphMode === "services" && focusScope !== "direct"
+          ? nbrs.has(e.src) && nbrs.has(e.dst)
+          : e.src === focus.path || e.dst === focus.path)
+      : searchSet ? (!dimmed(s) && !dimmed(t))
+      : true;
+    const hov = e === hoveredEdge;
+    ctx.strokeStyle = hov ? cAccent : cBorder;
+    ctx.lineWidth = hov ? 2.2 : 1.2;
+    ctx.globalAlpha = hov ? 1 : active ? (focus || searchSet ? 1 : 0.45) : 0.08;
+    // slight curvature: straight lines through the middle turn into a mess
+    const dx = t.x - s.x, dy = t.y - s.y, d = Math.hypot(dx, dy) || 1;
+    const off = Math.min(26, d * 0.1);
+    const cx = (s.x + t.x) / 2 - dy / d * off, cy = (s.y + t.y) / 2 + dx / d * off;
+    ctx.beginPath(); ctx.moveTo(s.x, s.y);
+    ctx.quadraticCurveTo(cx, cy, t.x, t.y); ctx.stroke();
+    if (graphMode === "services") {
+      arrowHead(t, cx, cy);              // src uses dst
+      if (e.both) arrowHead(s, cx, cy);  // opposing pair: both ends
+      if (e.label && (hov || (focus && active))) {
+        ctx.fillStyle = hov ? cAccent : cDim;
+        ctx.font = (hov ? "10px" : "9px") + " system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText(e.label.slice(0, 26),
+                     (s.x + 2 * cx + t.x) / 4, (s.y + 2 * cy + t.y) / 4 - 4);
+      }
+    }
+  }
+  for (const n of nodes) {
+    if (hiddenN(n)) continue;
+    const dim = dimmed(n);
+    ctx.globalAlpha = dim ? 0.15 : 1;
+    ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, 7);
+    if (n.ghost) {
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = css("--danger"); ctx.lineWidth = 2;
+      ctx.stroke(); ctx.setLineDash([]);
+    } else {
+      ctx.fillStyle = css(SECTION_COLORS[n.section] || "--c-inbox");
+      ctx.fill();
+      if (graphMode === "memory" && n.degree === 0) {
+        ctx.strokeStyle = css("--danger"); ctx.lineWidth = 2.5; ctx.stroke();
+      }
+    }
+    if (n === selected) { ctx.strokeStyle = css("--accent"); ctx.lineWidth = 3; ctx.stroke(); }
+    // Label: with focus/search only the relevant subset; otherwise only when
+    // zoomed in or for well-connected nodes
+    if (focus || searchSet ? !dim
+              : n.meta || view.k > 1.2
+                || (n.degree || 0) >= labelMinDegree || n === selected) {
+      ctx.fillStyle = n.ghost ? css("--danger") : css("--fg");
+      ctx.font = "11px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText(n.title.slice(0, 28) + (n.badge ? "  ⟨+" + n.badge + "⟩" : ""),
+                   n.x, n.y + n.r + 13);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  requestAnimationFrame(draw);
+}
+
+const toWorld = (mx, my) => ({x: (mx - view.x) / view.k, y: (my - view.y) / view.k});
+const hit = (mx, my) => {
+  const p = toWorld(mx, my);
+  return nodes.find(n => !hiddenSections.has(n.section) &&
+                         (n.x-p.x)**2 + (n.y-p.y)**2 < (n.r+4)**2);
+};
+// Edge hit test (service mode): nearest point on the curve within ~7px
+function edgeAt(mx, my) {
+  if (graphMode !== "services") return null;
+  const p = toWorld(mx, my);
+  let best = null, bd = 7 / view.k;
+  for (const e of edges) {
+    const s = nodeByPath[e.src], t = nodeByPath[e.dst];
+    const dx = t.x - s.x, dy = t.y - s.y, d = Math.hypot(dx, dy) || 1;
+    const off = Math.min(26, d * 0.1);
+    const cx = (s.x + t.x) / 2 - dy / d * off, cy = (s.y + t.y) / 2 + dx / d * off;
+    for (let i = 1; i < 12; i++) {
+      const u = i / 12, a = 1 - u;
+      const x = a*a*s.x + 2*a*u*cx + u*u*t.x, y = a*a*s.y + 2*a*u*cy + u*u*t.y;
+      const dd = Math.hypot(x - p.x, y - p.y);
+      if (dd < bd) { bd = dd; best = e; }
+    }
+  }
+  return best;
+}
+let mouseMoved = false;
+canvas.onmousedown = e => {
+  mouseMoved = false;
+  const n = hit(e.offsetX, e.offsetY);
+  if (n) { dragging = n; hovered = n; }
+  else panning = {x: e.offsetX - view.x, y: e.offsetY - view.y};
+};
+canvas.onmousemove = e => {
+  if (dragging) { mouseMoved = true; const p = toWorld(e.offsetX, e.offsetY);
+                  dragging.x = p.x; dragging.y = p.y; hot = Math.max(hot, 30); }
+  else if (panning) { mouseMoved = true;
+                      view.x = e.offsetX - panning.x; view.y = e.offsetY - panning.y; }
+  else {
+    hovered = hit(e.offsetX, e.offsetY) || null;
+    hoveredEdge = hovered ? null : edgeAt(e.offsetX, e.offsetY);
+    canvas.style.cursor = hovered ? "pointer" : "grab";
+  }
+};
+canvas.onmouseleave = () => { hovered = null; hoveredEdge = null; };
+canvas.onmouseup = () => { dragging = null; panning = null; };
+canvas.onclick = e => {
+  if (mouseMoved) return;  // pan/drag is not a click
+  const n = hit(e.offsetX, e.offsetY);
+  if (!n) { selected = null; $("#panel").classList.remove("open"); return; }
+  selected = n;
+  if (graphMode === "services") {
+    if (n.meta) showNsPanel(n);
+    else if (n.doc) openDocInPanel(n.doc);
+    else showGhostPanel(n.title);
+  } else if (!n.meta) {        // meta node: select only, no concept panel
+    openPanel(n.path);
+  }
+};
+canvas.ondblclick = e => {
+  if (graphMode === "services") {
+    const n = hit(e.offsetX, e.offsetY);
+    if (!n) {                  // double-click on empty space: leave ego view
+      if (svcIsolated) { svcIsolated = null; buildServiceView(); }
+      return;
+    }
+    if (n.meta) {              // expand namespace (one level deeper)
+      expandedNs.add(n.name);
+      selected = null; hovered = null;
+      $("#panel").classList.remove("open");
+      buildServiceView();
+      return;
+    }
+    // Isolate leaf service; expand ancestors so it stays visible
+    if (svcIsolated !== n.path) {
+      const segs = n.name.split("."); let acc = "";
+      for (let i = 0; i < segs.length - 1; i++) {
+        acc = i ? acc + "." + segs[i] : segs[i]; expandedNs.add(acc);
+      }
+    }
+    svcIsolated = svcIsolated === n.path ? null : n.path;
+    selected = null; hovered = null;
+    $("#panel").classList.remove("open");
+    buildServiceView();
+    return;
+  }
+  if (graphMode !== "memory" || !baseGraph) return;
+  const n = hit(e.offsetX, e.offsetY);
+  if (!n) return;
+  if (n.meta) collapsedSections.delete(n.section);
+  else collapsedSections.add(n.section);
+  selected = null; hovered = null; $("#panel").classList.remove("open");
+  buildMemoryView();
+  setStatus(t("status.nodes", {n: nodes.length, e: edges.length}));
+};
+
+async function openDocInPanel(docPath) {
+  const d = await api("/api/doc?path=" + encodeURIComponent(docPath));
+  const panel = $("#panel");
+  panel.innerHTML = `<button class="close">✕</button>
+    <h2>${esc(d.title)}</h2>
+    <div class="meta">${esc(docPath.replace(/^doc:/, ""))} · ${t("doc.panelMeta")}</div>
+    <div class="docview" style="padding:0;overflow:visible">${d.html}</div>`;
+  panel.classList.add("open");
+  panel.querySelector(".close").onclick = () => panel.classList.remove("open");
+}
+
+function showGhostPanel(name) {
+  const panel = $("#panel");
+  const sug = svcData?.nodes.find(x => x.name === name)?.suggest;
+  const sugHtml = sug ? t("ghost.typo", {sug: esc(sug)}) : "";
+  panel.innerHTML = `<button class="close">✕</button>
+    <h2>👻 ${esc(name)}</h2>
+    <div class="meta">${t("ghost.meta")}</div>
+    ${sugHtml}
+    ${t("ghost.create", {name: esc(name)})}`;
+  panel.classList.add("open");
+  panel.querySelector(".close").onclick = () => panel.classList.remove("open");
+}
+
+function showNsPanel(n) {
+  const panel = $("#panel");
+  const memSet = new Set(n.members || []);
+  const mem = [...memSet].sort();
+  let intra = 0, ext = 0;                       // real dep counts from the raw data
+  for (const e of svcData.edges) if (memSet.has(e.src))
+    (memSet.has(e.dst) ? intra++ : ext++);
+  panel.innerHTML = `<button class="close">✕</button>
+    <h2>📦 ${esc(n.name)}</h2>
+    <div class="meta">${t("ns.meta", {n: mem.length, i: intra, x: ext})}</div>
+    <ul>${mem.map(m => `<li><a data-svc="${esc(m)}">${esc(m)}</a></li>`).join("")}</ul>`;
+  panel.classList.add("open");
+  panel.querySelector(".close").onclick = () => panel.classList.remove("open");
+  panel.querySelectorAll("a[data-svc]").forEach(a =>
+    a.onclick = () => revealService(a.dataset.svc));
+}
+// Make a specific service visible: expand all namespace ancestors, turn
+// ghosts on if needed, then select and center it.
+function revealService(name) {
+  const segs = name.split("."); let acc = "";
+  for (let i = 0; i < segs.length; i++) {
+    acc = i ? acc + "." + segs[i] : segs[i]; expandedNs.add(acc);
+  }
+  if (svcData.nodes.find(n => n.name === name)?.ghost) showGhosts = true;
+  svcIsolated = null;
+  buildServiceView();
+  const node = nodeByPath["svc:" + name] || nodeByPath["ns:" + name];
+  if (node) {
+    selected = node;
+    view.k = Math.max(view.k, 1.2);
+    view.x = canvas.clientWidth / 2 - node.x * view.k;
+    view.y = canvas.clientHeight / 2 - node.y * view.k;
+  }
+}
+canvas.onwheel = e => {
+  e.preventDefault();
+  const k = Math.min(4, Math.max(0.2, view.k * (e.deltaY < 0 ? 1.15 : 0.87)));
+  const p = toWorld(e.offsetX, e.offsetY);
+  view.x = e.offsetX - p.x * k; view.y = e.offsetY - p.y * k; view.k = k;
+};
+
+// ---------- Concept panel (mini markdown renderer) ----------
+const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function md(text) {
+  return text.split(/\n\n+/).map(block => {
+    let b = esc(block.trim());
+    b = b.replace(/\[([^\]]+)\]\((\/[^)]+\.md)\)/g,
+                  '<a data-path="$2">$1</a>');
+    b = b.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,
+                  '<a href="$2" target="_blank">$1</a>');
+    b = b.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+    if (/^### /.test(b)) return "<h3>" + b.slice(4) + "</h3>";
+    if (/^## /.test(b)) return "<h2>" + b.slice(3) + "</h2>";
+    if (/^# /.test(b)) return "<h1>" + b.slice(2) + "</h1>";
+    if (/^- /m.test(b))
+      return "<ul>" + b.split(/\n/).filter(l => l.startsWith("- "))
+                       .map(l => "<li>" + l.slice(2) + "</li>").join("") + "</ul>";
+    return "<p>" + b.replace(/\n/g, "<br>") + "</p>";
+  }).join("");
+}
+async function openPanel(path) {
+  const c = await api("/api/concept?path=" + encodeURIComponent(path));
+  const panel = $("#panel");
+  panel.innerHTML = `<button class="close">✕</button>
+    <h2>${esc(c.meta.title || c.path)}</h2>
+    <div class="meta"><span class="pill">${esc(c.meta.type)}</span> ${esc(c.path)}<br>
+      ${esc(c.meta.description || "")}<br>
+      <small>${esc(c.meta.timestamp || "")} · via ${esc(c.meta.source || "?")}</small></div>
+    <div class="body">${md(c.body)}</div>`;
+  panel.classList.add("open");
+  panel.querySelector(".close").onclick = () => panel.classList.remove("open");
+  panel.querySelectorAll("a[data-path]").forEach(a => a.onclick = () => {
+    const p = a.dataset.path.replace(/^\//, "");
+    if (nodeByPath[p]) { selected = nodeByPath[p]; }
+    openPanel(p);
+  });
+}
+
+// ---------- Traces & reviews ----------
+async function loadTraces() {
+  const rows = await api("/api/traces");
+  $("#traces").innerHTML = rows.length ? `<table><tr><th>${t("traces.time")}</th>
+    <th>${t("traces.client")}</th><th>${t("traces.op")}</th>
+    <th>${t("traces.query")}</th><th>${t("traces.source")}</th>
+    <th>${t("traces.detail")}</th></tr>` +
+    rows.map(r => `<tr><td>${esc(r.ts.slice(0,19).replace("T"," "))}</td>
+      <td><span class="pill">${esc(r.client)}</span></td><td>${esc(r.op)}</td>
+      <td>${esc(r.query || "")}</td><td>${esc(r.source)}</td>
+      <td style="max-width:340px;word-break:break-all">${esc((r.detail||"").slice(0,300))}</td></tr>`).join("") +
+    "</table>" : `<div class="empty">${t("traces.empty")}</div>`;
+}
+// Display titles for top-level doc folders; unknown folders show their name.
+const GROUP_TITLES = {"": t("docs.overview")};
+let currentDoc = null;
+// Collapsed doc groups (set of group keys), remembered across sessions.
+// null = never set -> apply the initial state below once.
+const storedDocGroups = localStorage.getItem("librarian_doc_collapsed");
+const collapsedDocGroups = new Set(storedDocGroups ? JSON.parse(storedDocGroups) : []);
+
+async function loadDocs() {
+  const list = await api("/api/docs");
+  if (!list.length) {
+    $("#doclist").innerHTML = `<div class="empty">${t("docs.empty")}</div>`;
+    return;
+  }
+  // group by top-level folder (doc:some-folder/... -> some-folder)
+  const groups = {};
+  for (const d of list) {
+    const rel = d.path.replace(/^doc:/, "");
+    const grp = rel.includes("/") ? rel.split("/")[0] : "";
+    (groups[grp] = groups[grp] || []).push(d);
+  }
+  const order = Object.keys(groups).sort((a, b) =>
+    (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
+  // First start (nothing remembered): collapse everything except the overview
+  if (storedDocGroups === null)
+    order.forEach(grp => { if (grp !== "") collapsedDocGroups.add(grp); });
+  $("#doclist").innerHTML = order.map(grp =>
+    `<div class="docgrp${collapsedDocGroups.has(grp) ? " collapsed" : ""}"
+          data-grp="${esc(grp)}">
+       <div class="grp"><span class="grp-caret">▸</span>
+         <span>${esc(GROUP_TITLES[grp] || grp)}</span>
+         <span class="grp-count">${groups[grp].length}</span></div>
+       <div class="docgrp-items">` +
+       groups[grp].map(d => `<a data-doc="${esc(d.path)}"
+          title="${esc(d.path)}">${esc(d.title)}</a>`).join("") +
+    `</div></div>`
+  ).join("");
+  $("#doclist").querySelectorAll(".docgrp .grp").forEach(h => h.onclick = () => {
+    const box = h.parentElement;
+    const collapsed = box.classList.toggle("collapsed");
+    collapsed ? collapsedDocGroups.add(box.dataset.grp)
+              : collapsedDocGroups.delete(box.dataset.grp);
+    localStorage.setItem("librarian_doc_collapsed",
+                         JSON.stringify([...collapsedDocGroups]));
+  });
+  $("#doclist").querySelectorAll("a[data-doc]").forEach(a =>
+    a.onclick = () => openDoc(a.dataset.doc));
+  if (currentDoc) markActive();
+}
+
+function markActive() {
+  $("#doclist").querySelectorAll("a[data-doc]").forEach(a => {
+    const on = a.dataset.doc === currentDoc;
+    a.classList.toggle("active", on);
+    // never hide the active document inside a collapsed group
+    if (on) {
+      const box = a.closest(".docgrp");
+      if (box && box.classList.contains("collapsed")) {
+        box.classList.remove("collapsed");
+        collapsedDocGroups.delete(box.dataset.grp);
+      }
+    }
+  });
+}
+
+async function openDoc(path) {
+  const d = await api("/api/doc?path=" + encodeURIComponent(path));
+  currentDoc = path;
+  markActive();
+  $("#docview").innerHTML =
+    `<div class="doc-crumb">📖 ${esc(d.path.replace(/^doc:/, ""))} · ${t("doc.readonly")}</div>`
+    + d.html;
+  $("#docview").scrollTop = 0;
+  // open internal .md links in the viewer instead of navigating
+  $("#docview").querySelectorAll("a[href]").forEach(a => {
+    const href = a.getAttribute("href");
+    if (/^https?:/.test(href)) { a.target = "_blank"; return; }
+    if (!/\.md(#.*)?$/.test(href)) return;
+    a.onclick = e => {
+      e.preventDefault();
+      const clean = href.replace(/#.*$/, "");
+      const base = d.path.replace(/^doc:/, "").split("/").slice(0, -1);
+      const target = clean.startsWith("/")
+        ? clean.slice(1)
+        : normalizePath(base.concat(clean.split("/")));
+      openDoc("doc:" + target);
+    };
+  });
+}
+
+function normalizePath(parts) {
+  const out = [];
+  for (const p of parts) {
+    if (p === "." || p === "") continue;
+    if (p === "..") out.pop(); else out.push(p);
+  }
+  return out.join("/");
+}
+
+async function loadReviews() {
+  const rv = await api("/api/reviews");
+  $("#reviews").innerHTML = rv.length ? rv.map(r => `<div class="rv" style="padding:10px;
+      border-bottom:1px solid var(--border)">
+      <span class="pill">${esc(r.kind)}</span> ${esc(r.detail)}<br>
+      <small style="color:var(--dim)">${esc(r.ts)}</small><br>
+      ${r.kind === "duplicate"
+        ? `<button data-id="${r.id}" data-a="merge">${t("rv.merge")}</button>` : ""}
+      <button data-id="${r.id}" data-s="done">${t("rv.done")}</button>
+      <button data-id="${r.id}" data-s="dismissed">${t("rv.dismiss")}</button>
+      <span class="rv-status" style="color:var(--dim)"></span></div>`).join("")
+    : `<div class="empty">${t("rv.empty")}</div>`;
+  $("#reviews").querySelectorAll("button").forEach(b => b.onclick = async () => {
+    const body = b.dataset.a === "merge"
+      ? {id: +b.dataset.id, action: "merge"}
+      : {id: +b.dataset.id, status: b.dataset.s};
+    if (b.dataset.a === "merge") {
+      b.disabled = true;
+      b.parentElement.querySelector(".rv-status").textContent = t("rv.merging");
+    }
+    const r = await fetch("/api/review", {method: "POST",
+      headers: {Authorization: "Bearer " + keyInput.value.trim(),
+                "Content-Type": "application/json"},
+      body: JSON.stringify(body)});
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      alert(t("rv.error") + (err.error || r.status));
+    }
+    loadReviews();
+    if (b.dataset.a === "merge") loadGraph();  // the graph has changed
+  });
+}
+
+// ---------- Boot ----------
+async function boot() {
+  resize();
+  // Always load the graph first (canvas/simulation needs the data), then open the remembered tab
+  try { await loadGraph(); }
+  catch (e) { setStatus(e.message); }
+  selectTab(location.hash.slice(1), {updateHash: false});
+}
+boot();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

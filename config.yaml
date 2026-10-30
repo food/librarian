@@ -1,0 +1,43 @@
+# Non-secret librarian configuration. Secrets -> .env
+# Every key here can also be set via environment / .env (upper-case name,
+# lists/dicts as JSON) -- the environment wins over this file.
+
+# Prioritised model candidates (Ollama tags). If one of them is already in
+# VRAM according to /api/ps, it is used (no model swap!). Otherwise the first
+# one is loaded. The call itself goes through LiteLLM: mapping below.
+# FORCE_MODEL in .env disables the selection entirely.
+librarian_models:
+  - qwen3.6:35b-a3b
+  - gemma4:12b
+  - qwen3:30b-a3b
+
+# Ollama tag -> LiteLLM model_name. Models without an entry land on
+# litellm_fallback_model.
+litellm_model_map: {}
+
+# The chat lane in LiteLLM. Used whenever litellm_model_map has no entry for
+# the selected model.
+litellm_fallback_model: librarian-chat
+
+# /api/ps cache in seconds
+model_ps_ttl: 30
+
+# LLM robustness. Raise the timeout when the GPU is shared and Ollama may
+# run CPU-bound -- 120s cut off even trivial completions in such a setup.
+llm_timeout: 120        # seconds per completion call
+llm_retries: 2          # retries with error feedback, then deterministic fallback
+
+# Full-corpus sweep (python -m librarian.sweep): cheap model for the many
+# map calls (one call per concept). Empty = normal model selection.
+sweep_model: ""
+
+# Query
+fts_candidates: 8       # FTS prefilter: top-N concept candidates
+query_max_iterations: 4 # traversal budget of the librarian loop
+
+# Hot cache
+hot_cache_ttl_days: 7
+hot_cache_max_entries: 30
+
+server_host: 0.0.0.0
+server_port: 8765
