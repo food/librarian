@@ -12,8 +12,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Env(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    litellm_base_url: str = "http://localhost:4000/v1"
-    litellm_api_key: str = "sk-anything"
     ollama_base_url: str = "http://localhost:11434"
     bundle_path: Path = Path("/bundle")
     data_path: Path = Path("/data")

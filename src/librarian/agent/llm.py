@@ -6,20 +6,18 @@ swap). If none is loaded, the first in the list is loaded on purpose.
 If Ollama is unreachable, the LiteLLM fallback alias applies
 (librarian-chat: local -> cloud-pool -> copilot).
 
-chat_json: a narrowly scoped completion call, Pydantic-validated, with
-error-feedback retries. Raises LlmUnavailable if everything fails - the
+chat_json: a narrowly scoped completion call through llmkit, Pydantic-validated,
+with error-feedback retries. Raises LlmUnavailable if everything fails - the
 caller ALWAYS has a deterministic fallback.
 """
 from __future__ import annotations
 
-import json
-import re
 import time
 from typing import TypeVar
 
 import httpx
-from openai import OpenAI
-from pydantic import BaseModel, ValidationError
+import llmkit
+from pydantic import BaseModel
 
 from ..config import Settings
 
@@ -64,28 +62,10 @@ class ModelSelector:
         return model
 
 
-def _extract_json(text: str) -> str:
-    """Peel JSON out of an LLM reply (tolerate thinking remnants, code fences)."""
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    fence = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.DOTALL)
-    if fence:
-        text = fence.group(1)
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end > start:
-        return text[start:end + 1]
-    return text.strip()
-
-
 class Llm:
     def __init__(self, settings: Settings, selector: ModelSelector | None = None):
         self.s = settings
         self.selector = selector or ModelSelector(settings)
-        self.client = OpenAI(
-            base_url=settings.env.litellm_base_url,
-            api_key=settings.env.litellm_api_key,
-            timeout=settings.cfg.llm_timeout,
-        )
 
     def chat_json(self, system: str, user: str, schema: type[T],
                   model: str | None = None) -> T:
@@ -93,36 +73,14 @@ class Llm:
 
         model: explicit LiteLLM model name (for A/B tests); default = selector.
         """
-        model = model or self.selector.pick()
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
-        last_err = "empty"
-        for attempt in range(1 + self.s.cfg.llm_retries):
-            try:
-                resp = self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0.1,
-                    response_format={"type": "json_object"},
-                )
-                raw = (resp.choices[0].message.content or "").strip()
-            except Exception as e:
-                last_err = f"API error: {e}"
-                continue
-            if not raw:
-                last_err = "empty response"  # known qwen3 thinking symptom
-            else:
-                try:
-                    return schema.model_validate_json(_extract_json(raw))
-                except (ValidationError, json.JSONDecodeError, ValueError) as e:
-                    last_err = f"invalid JSON: {e}"
-            # error feedback for the retry
-            messages.append({"role": "assistant", "content": raw or "(empty)"})
-            messages.append({
-                "role": "user",
-                "content": f"Your reply was unusable ({last_err}). Reply ONLY with "
-                           f"valid JSON matching the required schema, no explanatory text.",
-            })
-        raise LlmUnavailable(f"LLM call failed after retries: {last_err}")
+        try:
+            return llmkit.chat_json(
+                user, system,
+                model=model or self.selector.pick(),
+                temperature=0.1,
+                timeout=self.s.cfg.llm_timeout,
+                retries=self.s.cfg.llm_retries,
+                check=schema.model_validate,
+            )
+        except llmkit.LLMError as e:
+            raise LlmUnavailable(f"LLM call failed after retries: {e}") from e

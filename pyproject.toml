@@ -5,7 +5,7 @@ description = "Local-first AI memory: OKF markdown bundle + librarian agent, exp
 requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=2.9,<3",
-    "openai>=1.60",
+    "llmkit @ https://github.com/food/llmkit/archive/refs/tags/v0.3.0.tar.gz",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "python-frontmatter>=1.1",
