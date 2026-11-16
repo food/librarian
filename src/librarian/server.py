@@ -1,7 +1,8 @@
 """FastMCP server: streamable HTTP on /mcp + REST /api + /health.
 
 Auth: static bearer key per client (CLIENT_KEYS in .env). The client name
-ends up in traces and git commit messages. /health is reachable without auth.
+ends up in traces and git commit messages. /health and the static web UI
+entry points are reachable without auth.
 """
 from __future__ import annotations
 
@@ -14,7 +15,12 @@ import anyio
 import uvicorn
 from fastmcp import FastMCP
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from starlette.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .config import get_settings
@@ -178,6 +184,12 @@ async def ui(_: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+@mcp.custom_route("/", methods=["GET"])
+async def root(_: Request) -> RedirectResponse:
+    """Send a browser that opens the bare address to the web UI."""
+    return RedirectResponse("/ui")
+
+
 @mcp.custom_route("/api/graph", methods=["GET"])
 async def api_graph(_: Request) -> JSONResponse:
     return JSONResponse(await anyio.to_thread.run_sync(ops.fts.graph))
@@ -270,16 +282,21 @@ async def api_review(request: Request) -> JSONResponse:
 
 # ---------------- Auth middleware ----------------
 
+# Reachable without a key. /ui is static HTML without data - it fetches all data
+# via /api with a key. A browser asks for / and /favicon.ico without the header;
+# a 401 there reads like a broken client key in the access log.
+OPEN_PATHS = ("/health", "/ui", "/", "/favicon.ico")
+
+
 class BearerAuth:
-    """Checks Authorization: Bearer <key> against CLIENT_KEYS; /health stays open."""
+    """Checks Authorization: Bearer <key> against CLIENT_KEYS; OPEN_PATHS stay open."""
 
     def __init__(self, app: ASGIApp, keys: dict[str, str]):
         self.app = app
         self.keys = keys  # key -> client-name
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        # /ui is static HTML without data - it fetches all data via /api with a key
-        if scope["type"] != "http" or scope.get("path") in ("/health", "/ui"):
+        if scope["type"] != "http" or scope.get("path") in OPEN_PATHS:
             await self.app(scope, receive, send)
             return
         headers = dict(scope.get("headers") or [])
